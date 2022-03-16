@@ -127,7 +127,7 @@ void setup()
   for (int i = 5; i < 8; i++)
   {
     ledcSetup(i, SERVO_PWM_FREQ, SERVO_PWM_RESOLUTION);
-    ledcAttachPin(servoPwmPins[i], i);
+    ledcAttachPin(servoPwmPins[i - 5], i);
   }
 }
 
@@ -245,7 +245,6 @@ void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float
 {
   int64_t saveEncoder = getCurrentEncoder(channel);
   unsigned long long int saveTime = millis();
-  motor(channel, direction, speed);
   while (true)
   {
     if (millis() - saveTime > MOTOR_PULSE_COUNTDOWN_TIMEOUT * 1000)
@@ -253,38 +252,31 @@ void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float
       motor(channel, ForceStop);
       return;
     }
-
-    int64_t elapsedEncoder = abs(getCurrentEncoder(channel) - saveEncoder);
-    float remaining = abs(encoderTotal - elapsedEncoder) / encoderTotal;
-    float currentSpeed;
-    if (remaining <= 0.3)
-    {
-      currentSpeed = 0.3;
-    }
-    else
-    {
-    }
-    if (encoderTotal - elapsedEncoder <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
+    int64_t elapsedEncoder = getCurrentEncoder(channel) - saveEncoder;
+    if (abs(encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
     {
       motor(channel, ForceStop);
       return;
     }
-    else if (encoderTotal - elapsedEncoder < 0)
+    float percentProgress = elapsedEncoder / encoderTotal * 100.0;
+    float currentSpeed;
+    if (percentProgress < 10.0)
     {
-
-      if (direction == Clockwise)
-      {
-        motor(channel, CounterClockwise, remaining);
-      }
-      else
-      {
-        motor(channel, Clockwise, remaining);
-      }
+      currentSpeed = 5 * speed / encoderTotal * elapsedEncoder;
     }
-    else if (encoderTotal - elapsedEncoder > 0)
+    else if (percentProgress > 90)
     {
-      motor(channel, direction, remaining);
+      currentSpeed = -5 * speed / encoderTotal * elapsedEncoder + 5;
     }
+    else
+    {
+      currentSpeed = speed;
+    }
+    if (currentSpeed < 0.1)
+    {
+      currentSpeed = 0.1;
+    }
+    motor(channel, direction, currentSpeed);
     delay(100);
   }
 }
@@ -301,6 +293,8 @@ int64_t getCurrentEncoder(MotorChannel channel)
     return encoder3.getCount();
   case Right:
     return encoder4.getCount();
+  case Grabber:
+    return encoder5.getCount();
   default:
     return 0;
   }
