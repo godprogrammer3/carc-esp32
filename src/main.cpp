@@ -49,8 +49,8 @@
 #define SERVO3_MAX 25
 
 // IR
-#define IR_PIN 2
-#define IR2_PIN 15
+#define IR_PIN 15
+#define IR2_PIN 7
 
 // Button
 #define BUTTON_PIN 13
@@ -119,6 +119,7 @@ void rotateDegree(void *degree);
 bool readIR(IRChannel irChannel);
 bool readButton();
 void writeLED(bool state);
+bool readLED();
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -208,13 +209,16 @@ void loop()
     }
   }
 
-  Serial.printf("Encoder count:");
-  Serial.printf(" %lld,", encoder.getCount());
-  Serial.printf(" %lld,", encoder2.getCount());
-  Serial.printf(" %lld,", encoder3.getCount());
-  Serial.printf(" %lld,", encoder4.getCount());
-  Serial.printf(" %lld,", encoder5.getCount());
-  Serial.println();
+  // Serial.printf("Encoder count:");
+  // Serial.printf(" %lld,", encoder.getCount());
+  // Serial.printf(" %lld,", encoder2.getCount());
+  // Serial.printf(" %lld,", encoder3.getCount());
+  // Serial.printf(" %lld,", encoder4.getCount());
+  // Serial.printf(" %lld,", encoder5.getCount());
+  // Serial.println();
+  Serial.printf("IR: %d, %d\n", readIR(IRChannel0), readIR(IRChannel1));
+  Serial.printf("Button: %d\n", readButton());
+  writeLED(!readLED());
   delay(300);
 }
 
@@ -412,7 +416,12 @@ bool readButton()
   return digitalRead(BUTTON_PIN);
 }
 
-void wireLED(bool state)
+void writeLED(bool state)
 {
   digitalWrite(LED_PIN, state);
+}
+
+bool readLED()
+{
+  return digitalRead(LED_PIN);
 }
