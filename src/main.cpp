@@ -42,12 +42,14 @@
 #define SERVO2_PWM_PIN 4
 #define SERVO3_PWM_PIN 0
 #define SERVO_MIN 6
-#define SERVO_MAX 20
+#define SERVO_MAX 35
 #define SERVO2_MIN 6
 #define SERVO2_MAX 41
 #define SERVO3_MIN 20
 #define SERVO3_MAX 25
 
+// Rotate
+#define ROTATE_TIMEOUT 60
 enum MotorDirection
 {
   Clockwise,
@@ -74,6 +76,21 @@ enum MinMax
   Min,
   Max,
 };
+enum RotateDirection
+{
+  LeftRotate,
+  RightRotate,
+  UTurnRotate,
+};
+
+typedef struct
+{
+  MotorChannel channel;
+  MotorDirection direction;
+  float speed;
+  int encoderTotal;
+} MotorEncoderCountdownParams;
+
 const int8_t motorPwmPins[] = {MOTOR_PWM_PIN, MOTOR2_PWM_PIN, MOTOR3_PWM_PIN, MOTOR4_PWM_PIN, MOTOR5_PWM_PIN};
 const int8_t motorAPins[] = {MOTOR_A_PIN, MOTOR2_A_PIN, MOTOR3_A_PIN, MOTOR4_A_PIN, MOTOR5_A_PIN};
 const int8_t motorBPins[] = {MOTOR_B_PIN, MOTOR2_B_PIN, MOTOR3_B_PIN, MOTOR4_B_PIN, MOTOR5_B_PIN};
@@ -82,7 +99,9 @@ const int8_t servoPwmPins[] = {SERVO_PWM_PIN, SERVO2_PWM_PIN, SERVO3_PWM_PIN};
 void motor(MotorChannel channel, MotorDirection direction, float speed);
 void servo(ServoChannel channel, int pulseWidth);
 int64_t getCurrentEncoder(MotorChannel channel);
-void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float speed, int encoderTotal);
+void motorEncoderCountdown(void *params);
+void rotateDirection(void *rotateDirection);
+void rotateDegree(void *degree);
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -92,6 +111,7 @@ ESP32Encoder encoder5;
 
 Adafruit_MCP23X17 mcp;
 
+int multitaskCompletedCount = 0;
 void setup()
 {
 
@@ -241,43 +261,44 @@ void servo(ServoChannel channel, MinMax minMax)
   }
 }
 
-void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float speed, int encoderTotal)
+void motorEncoderCountdown(void *params)
 {
-  int64_t saveEncoder = getCurrentEncoder(channel);
+  MotorEncoderCountdownParams _params = *(MotorEncoderCountdownParams *)params;
+  int64_t saveEncoder = getCurrentEncoder(_params.channel);
   unsigned long long int saveTime = millis();
   while (true)
   {
     if (millis() - saveTime > MOTOR_PULSE_COUNTDOWN_TIMEOUT * 1000)
     {
-      motor(channel, ForceStop);
+      motor(_params.channel, ForceStop);
       return;
     }
-    int64_t elapsedEncoder = getCurrentEncoder(channel) - saveEncoder;
-    if (abs(encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
+    int64_t elapsedEncoder = getCurrentEncoder(_params.channel) - saveEncoder;
+    if (abs(_params.encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
     {
-      motor(channel, ForceStop);
+      motor(_params.channel, ForceStop);
       return;
     }
-    float percentProgress = elapsedEncoder / encoderTotal * 100.0;
+    float percentProgress = elapsedEncoder / _params.encoderTotal * 100.0;
     float currentSpeed;
     if (percentProgress < 10.0)
     {
-      currentSpeed = 5 * speed / encoderTotal * elapsedEncoder;
+      currentSpeed = 5 * _params.speed / _params.encoderTotal * elapsedEncoder;
     }
     else if (percentProgress > 90)
     {
-      currentSpeed = -5 * speed / encoderTotal * elapsedEncoder + 5;
+      currentSpeed = -5 * _params.speed / _params.encoderTotal * elapsedEncoder + 5;
     }
     else
     {
-      currentSpeed = speed;
+      currentSpeed = _params.speed;
     }
     if (currentSpeed < 0.1)
     {
       currentSpeed = 0.1;
     }
-    motor(channel, direction, currentSpeed);
-    delay(100);
+    motor(_params.channel, _params.direction, currentSpeed);
+    vTaskDelay(100);
   }
 }
 
@@ -297,5 +318,52 @@ int64_t getCurrentEncoder(MotorChannel channel)
     return encoder5.getCount();
   default:
     return 0;
+  }
+}
+
+void rotateDirection(void *rotateDirection)
+{
+  RotateDirection _rotateDirection = *(RotateDirection *)(rotateDirection);
+  switch (_rotateDirection)
+  {
+  case LeftRotate:
+    rotateDegree((int *)90);
+  case RightRotate:
+    rotateDegree((int *)-90);
+  case UTurnRotate:
+    rotateDegree((int *)180);
+  default:
+    return;
+  }
+}
+
+void rotateDegree(void *degree)
+{
+  multitaskCompletedCount = 0;
+  unsigned long long int saveTime = millis();
+  TaskHandle_t task = NULL, task2 = NULL, task3 = NULL, task4 = NULL;
+  MotorEncoderCountdownParams params = {Front, Clockwise, 0.5, 1000};
+  MotorEncoderCountdownParams params2 = {Left, Clockwise, 0.5, 1000};
+  MotorEncoderCountdownParams params3 = {Right, Clockwise, 0.5, 1000};
+  MotorEncoderCountdownParams params4 = {Back, Clockwise, 0.5, 1000};
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params), 1, &task);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params2), 1, &task2);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params3), 1, &task3);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params4), 1, &task4);
+  while (true)
+  {
+    if (millis() - saveTime > ROTATE_TIMEOUT)
+    {
+      vTaskDelete(task);
+      vTaskDelete(task2);
+      vTaskDelete(task3);
+      vTaskDelete(task4);
+      return;
+    }
+    if (multitaskCompletedCount >= 4)
+    {
+      return;
+    }
+    delay(100);
   }
 }
