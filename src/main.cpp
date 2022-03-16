@@ -48,6 +48,16 @@
 #define SERVO3_MIN 20
 #define SERVO3_MAX 25
 
+// IR
+#define IR_PIN 2
+#define IR2_PIN 15
+
+// Button
+#define BUTTON_PIN 13
+
+// Led
+#define LED_PIN 12
+
 // Rotate
 #define ROTATE_TIMEOUT 60
 enum MotorDirection
@@ -82,7 +92,11 @@ enum RotateDirection
   RightRotate,
   UTurnRotate,
 };
-
+enum IRChannel
+{
+  IRChannel0,
+  IRChannel1,
+};
 typedef struct
 {
   MotorChannel channel;
@@ -102,6 +116,9 @@ int64_t getCurrentEncoder(MotorChannel channel);
 void motorEncoderCountdown(void *params);
 void rotateDirection(void *rotateDirection);
 void rotateDegree(void *degree);
+bool readIR(IRChannel irChannel);
+bool readButton();
+void writeLED(bool state);
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -149,6 +166,16 @@ void setup()
     ledcSetup(i, SERVO_PWM_FREQ, SERVO_PWM_RESOLUTION);
     ledcAttachPin(servoPwmPins[i - 5], i);
   }
+
+  // Button
+  pinMode(BUTTON_PIN, INPUT_PULLDOWN);
+
+  // LED
+  pinMode(LED_PIN, OUTPUT);
+
+  // IR
+  pinMode(IR_PIN, INPUT);
+  pinMode(IR2_PIN, INPUT);
 }
 
 void loop()
@@ -366,4 +393,26 @@ void rotateDegree(void *degree)
     }
     delay(100);
   }
+}
+
+bool readIR(IRChannel irChannel)
+{
+  if (irChannel == IRChannel0)
+  {
+    return digitalRead(IR_PIN);
+  }
+  else
+  {
+    return digitalRead(IR2_PIN);
+  }
+}
+
+bool readButton()
+{
+  return digitalRead(BUTTON_PIN);
+}
+
+void wireLED(bool state)
+{
+  digitalWrite(LED_PIN, state);
 }
