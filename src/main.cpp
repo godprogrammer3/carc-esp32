@@ -3,8 +3,6 @@
 #include <Adafruit_MCP23X17.h>
 
 // Encoder define
-#define GRABBER_ENCODER_A_PIN 36
-#define GRABBER_ENCODER_B_PIN 39
 #define ENCODER_A_PIN 34
 #define ENCODER_B_PIN 35
 #define ENCODER2_A_PIN 32
@@ -13,6 +11,8 @@
 #define ENCODER3_B_PIN 26
 #define ENCODER4_A_PIN 27
 #define ENCODER4_B_PIN 14
+#define ENCODER5_A_PIN 36
+#define ENCODER5_B_PIN 39
 
 // Motor define
 #define MOTOR_PWM_FREQ 1000
@@ -29,15 +29,11 @@
 #define MOTOR4_A_PIN 7
 #define MOTOR4_B_PIN 6
 #define MOTOR4_PWM_PIN 17
+#define MOTOR5_A_PIN 8
+#define MOTOR5_B_PIN 9
+#define MOTOR5_PWM_PIN 23
 #define MOTOR_PULSE_COUNTDOWN_TOLERENT 10
 #define MOTOR_PULSE_COUNTDOWN_TIMEOUT 60
-
-// Grabber
-#define GRABBER_A_PIN 8
-#define GRABBER_B_PIN 9
-#define GRABBER_PWM_PIN 23
-#define GRABBER_PWM_FREQ 1000
-#define GRABBER_PWM_RESOLUTION 10
 
 // Servo
 #define SERVO_PWM_FREQ 50
@@ -65,6 +61,7 @@ enum MotorChannel
   Back,
   Left,
   Right,
+  Grabber,
 };
 enum ServoChannel
 {
@@ -77,23 +74,15 @@ enum MinMax
   Min,
   Max,
 };
-enum GrabberAction
-{
-  Grab,
-  Release,
-  GrabStop,
-  GrabForceStop,
-};
-const int8_t motorPwmPins[] = {MOTOR_PWM_PIN, MOTOR2_PWM_PIN, MOTOR3_PWM_PIN, MOTOR4_PWM_PIN};
-const int8_t motorAPins[] = {MOTOR_A_PIN, MOTOR2_A_PIN, MOTOR3_A_PIN, MOTOR4_A_PIN};
-const int8_t motorBPins[] = {MOTOR_B_PIN, MOTOR2_B_PIN, MOTOR3_B_PIN, MOTOR4_B_PIN};
+const int8_t motorPwmPins[] = {MOTOR_PWM_PIN, MOTOR2_PWM_PIN, MOTOR3_PWM_PIN, MOTOR4_PWM_PIN, MOTOR5_PWM_PIN};
+const int8_t motorAPins[] = {MOTOR_A_PIN, MOTOR2_A_PIN, MOTOR3_A_PIN, MOTOR4_A_PIN, MOTOR5_A_PIN};
+const int8_t motorBPins[] = {MOTOR_B_PIN, MOTOR2_B_PIN, MOTOR3_B_PIN, MOTOR4_B_PIN, MOTOR5_B_PIN};
 const int8_t servoPwmPins[] = {SERVO_PWM_PIN, SERVO2_PWM_PIN, SERVO3_PWM_PIN};
 
 void motor(MotorChannel channel, MotorDirection direction, float speed);
 void servo(ServoChannel channel, int pulseWidth);
 int64_t getCurrentEncoder(MotorChannel channel);
 void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float speed, int encoderTotal);
-void grabber(GrabberAction action, float speed);
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -114,7 +103,7 @@ void setup()
   encoder2.attachHalfQuad(ENCODER2_A_PIN, ENCODER2_B_PIN);
   encoder3.attachHalfQuad(ENCODER3_A_PIN, ENCODER3_B_PIN);
   encoder4.attachHalfQuad(ENCODER4_A_PIN, ENCODER4_B_PIN);
-  encoder5.attachHalfQuad(GRABBER_ENCODER_A_PIN, GRABBER_ENCODER_B_PIN);
+  encoder5.attachHalfQuad(ENCODER5_A_PIN, ENCODER5_B_PIN);
 
   // IO Extender
   if (!mcp.begin_I2C())
@@ -124,7 +113,7 @@ void setup()
   }
 
   // Motor
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < 5; i++)
   {
     pinMode(motorPwmPins[i], OUTPUT);
     mcp.pinMode(motorAPins[i], OUTPUT);
@@ -135,18 +124,11 @@ void setup()
   }
 
   // Servo
-  for (int i = 0; i < 3; i++)
+  for (int i = 5; i < 8; i++)
   {
-    ledcSetup(4 + i, SERVO_PWM_FREQ, SERVO_PWM_RESOLUTION);
-    ledcAttachPin(servoPwmPins[i], 4 + i);
+    ledcSetup(i, SERVO_PWM_FREQ, SERVO_PWM_RESOLUTION);
+    ledcAttachPin(servoPwmPins[i], i);
   }
-
-  // Grabber
-  pinMode(GRABBER_PWM_PIN, OUTPUT);
-  mcp.pinMode(GRABBER_A_PIN, OUTPUT);
-  mcp.pinMode(GRABBER_B_PIN, OUTPUT);
-  ledcSetup(7, GRABBER_PWM_FREQ, GRABBER_PWM_RESOLUTION);
-  ledcAttachPin(GRABBER_PWM_PIN, 7);
 }
 
 void loop()
@@ -169,17 +151,13 @@ void loop()
 
     values[2] = str.substring(startIndex).toInt();
 
-    if (values[0] < 4)
+    if (values[0] < 5)
     {
       motor((MotorChannel)values[0], (MotorDirection)values[1], values[2] / 100.0);
     }
-    else if (values[0] < 7)
-    {
-      servo((ServoChannel)(values[0] - 4), values[1]);
-    }
     else
     {
-      grabber((GrabberAction)(values[0] - 7), values[1] / 100.0);
+      servo((ServoChannel)(values[0] - 5), values[1]);
     }
   }
 
@@ -278,9 +256,13 @@ void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float
 
     int64_t elapsedEncoder = abs(getCurrentEncoder(channel) - saveEncoder);
     float remaining = abs(encoderTotal - elapsedEncoder) / encoderTotal;
+    float currentSpeed;
     if (remaining <= 0.3)
     {
-      remaining = 0.3;
+      currentSpeed = 0.3;
+    }
+    else
+    {
     }
     if (encoderTotal - elapsedEncoder <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
     {
@@ -292,7 +274,6 @@ void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float
 
       if (direction == Clockwise)
       {
-
         motor(channel, CounterClockwise, remaining);
       }
       else
@@ -323,26 +304,4 @@ int64_t getCurrentEncoder(MotorChannel channel)
   default:
     return 0;
   }
-}
-void grabber(GrabberAction action, float speed)
-{
-  switch (action)
-  {
-  case Grab:
-    mcp.digitalWrite(GRABBER_A_PIN, LOW);
-    mcp.digitalWrite(GRABBER_B_PIN, HIGH);
-    break;
-  case Release:
-    mcp.digitalWrite(GRABBER_A_PIN, HIGH);
-    mcp.digitalWrite(GRABBER_B_PIN, LOW);
-    break;
-  case GrabForceStop:
-    mcp.digitalWrite(GRABBER_A_PIN, HIGH);
-    mcp.digitalWrite(GRABBER_B_PIN, HIGH);
-    break;
-  default:
-    mcp.digitalWrite(GRABBER_A_PIN, LOW);
-    mcp.digitalWrite(GRABBER_B_PIN, LOW);
-  }
-  ledcWrite(7, (int)(1024 * speed));
 }
