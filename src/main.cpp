@@ -30,10 +30,11 @@
 #define MOTOR4_B_PIN 6
 #define MOTOR4_PWM_PIN 17
 #define MOTOR_PULSE_COUNTDOWN_TOLERENT 10
+#define MOTOR_PULSE_COUNTDOWN_TIMEOUT 60
 
 // Grabber
-#define GRABBER_PIN_A_PIN 8
-#define GRABBER_PIN_B_PIN 9
+#define GRABBER_A_PIN 8
+#define GRABBER_B_PIN 9
 #define GRABBER_PWM_PIN 23
 #define GRABBER_PWM_FREQ 1000
 #define GRABBER_PWM_RESOLUTION 10
@@ -91,7 +92,7 @@ const int8_t servoPwmPins[] = {SERVO_PWM_PIN, SERVO2_PWM_PIN, SERVO3_PWM_PIN};
 void motor(MotorChannel channel, MotorDirection direction, float speed);
 void servo(ServoChannel channel, int pulseWidth);
 int64_t getCurrentEncoder(MotorChannel channel);
-void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, int speed, int encoderCount);
+void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float speed, int encoderTotal);
 void grabber(GrabberAction action, float speed);
 
 ESP32Encoder encoder;
@@ -142,8 +143,8 @@ void setup()
 
   // Grabber
   pinMode(GRABBER_PWM_PIN, OUTPUT);
-  mcp.pinMode(GRABBER_ENCODER_A_PIN, OUTPUT);
-  mcp.pinMode(GRABBER_ENCODER_B_PIN, OUTPUT);
+  mcp.pinMode(GRABBER_A_PIN, OUTPUT);
+  mcp.pinMode(GRABBER_B_PIN, OUTPUT);
   ledcSetup(7, GRABBER_PWM_FREQ, GRABBER_PWM_RESOLUTION);
   ledcAttachPin(GRABBER_PWM_PIN, 7);
 }
@@ -194,27 +195,28 @@ void loop()
 
 void motor(MotorChannel channel, MotorDirection direction, float speed = 0)
 {
+  int _channel = (int)channel;
   if (direction == Clockwise)
   {
-    mcp.digitalWrite(motorAPins[channel], HIGH);
-    mcp.digitalWrite(motorBPins[channel], LOW);
+    mcp.digitalWrite(motorAPins[_channel], HIGH);
+    mcp.digitalWrite(motorBPins[_channel], LOW);
   }
   else if (direction == CounterClockwise)
   {
-    mcp.digitalWrite(motorAPins[channel], LOW);
-    mcp.digitalWrite(motorBPins[channel], HIGH);
+    mcp.digitalWrite(motorAPins[_channel], LOW);
+    mcp.digitalWrite(motorBPins[_channel], HIGH);
   }
   else if (direction == ForceStop)
   {
-    mcp.digitalWrite(motorAPins[channel], HIGH);
-    mcp.digitalWrite(motorBPins[channel], HIGH);
+    mcp.digitalWrite(motorAPins[_channel], HIGH);
+    mcp.digitalWrite(motorBPins[_channel], HIGH);
   }
   else
   {
-    mcp.digitalWrite(motorAPins[channel], LOW);
-    mcp.digitalWrite(motorBPins[channel], LOW);
+    mcp.digitalWrite(motorAPins[_channel], LOW);
+    mcp.digitalWrite(motorBPins[_channel], LOW);
   }
-  ledcWrite(channel, (int)(speed * 1024));
+  ledcWrite(_channel, (int)(speed * 1024));
 }
 
 void servo(ServoChannel channel, int pulseWidth)
@@ -261,9 +263,49 @@ void servo(ServoChannel channel, MinMax minMax)
   }
 }
 
-void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, int speed, int encoderCount)
+void motorEncoderCountdown(MotorChannel channel, MotorDirection direction, float speed, int encoderTotal)
 {
-  int currentEncoder = getCurrentEncoder(channel);
+  int64_t saveEncoder = getCurrentEncoder(channel);
+  unsigned long long int saveTime = millis();
+  motor(channel, direction, speed);
+  while (true)
+  {
+    if (millis() - saveTime > MOTOR_PULSE_COUNTDOWN_TIMEOUT * 1000)
+    {
+      motor(channel, ForceStop);
+      return;
+    }
+
+    int64_t elapsedEncoder = abs(getCurrentEncoder(channel) - saveEncoder);
+    float remaining = abs(encoderTotal - elapsedEncoder) / encoderTotal;
+    if (remaining <= 0.3)
+    {
+      remaining = 0.3;
+    }
+    if (encoderTotal - elapsedEncoder <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
+    {
+      motor(channel, ForceStop);
+      return;
+    }
+    else if (encoderTotal - elapsedEncoder < 0)
+    {
+
+      if (direction == Clockwise)
+      {
+
+        motor(channel, CounterClockwise, remaining);
+      }
+      else
+      {
+        motor(channel, Clockwise, remaining);
+      }
+    }
+    else if (encoderTotal - elapsedEncoder > 0)
+    {
+      motor(channel, direction, remaining);
+    }
+    delay(100);
+  }
 }
 
 int64_t getCurrentEncoder(MotorChannel channel)
@@ -287,21 +329,20 @@ void grabber(GrabberAction action, float speed)
   switch (action)
   {
   case Grab:
-    mcp.digitalWrite(GRABBER_PIN_A_PIN, LOW);
-    mcp.digitalWrite(GRABBER_PIN_B_PIN, HIGH);
+    mcp.digitalWrite(GRABBER_A_PIN, LOW);
+    mcp.digitalWrite(GRABBER_B_PIN, HIGH);
     break;
   case Release:
-    mcp.digitalWrite(GRABBER_PIN_A_PIN, HIGH);
-    mcp.digitalWrite(GRABBER_PIN_B_PIN, LOW);
+    mcp.digitalWrite(GRABBER_A_PIN, HIGH);
+    mcp.digitalWrite(GRABBER_B_PIN, LOW);
     break;
   case GrabForceStop:
-    mcp.digitalWrite(GRABBER_PIN_A_PIN, HIGH);
-    mcp.digitalWrite(GRABBER_PIN_B_PIN, HIGH);
+    mcp.digitalWrite(GRABBER_A_PIN, HIGH);
+    mcp.digitalWrite(GRABBER_B_PIN, HIGH);
     break;
   default:
-    mcp.digitalWrite(GRABBER_PIN_A_PIN, LOW);
-    mcp.digitalWrite(GRABBER_PIN_B_PIN, LOW);
+    mcp.digitalWrite(GRABBER_A_PIN, LOW);
+    mcp.digitalWrite(GRABBER_B_PIN, LOW);
   }
   ledcWrite(7, (int)(1024 * speed));
-  Serial.printf("grabber(%d, %f)\n", action, speed);
 }
