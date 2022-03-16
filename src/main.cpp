@@ -46,7 +46,7 @@
 #define SERVO2_PWM_PIN 4
 #define SERVO3_PWM_PIN 0
 #define SERVO_MIN 6
-#define SERVO_MAX 20
+#define SERVO_MAX 35
 #define SERVO2_MIN 6
 #define SERVO2_MAX 41
 #define SERVO3_MIN 20
