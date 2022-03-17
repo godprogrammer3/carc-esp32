@@ -108,6 +108,13 @@ typedef struct
   float speed;
   int encoderTotal;
 } MotorEncoderCountdownParams;
+enum IRFilter
+{
+  IR1,
+  IR2,
+  IR1orIR2,
+  IR1andIR2,
+};
 
 const int8_t motorPwmPins[] = {MOTOR_PWM_PIN, MOTOR2_PWM_PIN, MOTOR3_PWM_PIN, MOTOR4_PWM_PIN, MOTOR5_PWM_PIN};
 const int8_t motorAPins[] = {MOTOR_A_PIN, MOTOR2_A_PIN, MOTOR3_A_PIN, MOTOR4_A_PIN, MOTOR5_A_PIN};
@@ -123,10 +130,15 @@ bool readButton();
 void writeLED(bool state);
 bool readLED();
 void move(float degree, int encoderTotal, float speed);
-void rotate(RotateDirection rotateDirection, RotateMotor rotateMotor);
-void rotate(float degree, RotateMotor rotateMotor);
+void move(float degree, float speed);
+void rotate(RotateDirection rotateDirection, float speed, RotateMotor rotateMotor);
+void rotate(float degree, float speed, RotateMotor rotateMotor);
 void clearAllEncoder();
 void stopAllMotor();
+void start();
+void moveUntil(float degree, float speed, IRFilter filter, bool ir, bool ir2);
+void forceStopAllMotor();
+void calibrate();
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -185,6 +197,18 @@ void setup()
   // IR
   mcp.pinMode(IR_PIN, INPUT);
   mcp.pinMode(IR2_PIN, INPUT);
+
+  while (true)
+  {
+    if (readButton())
+    {
+      writeLED(false);
+      delay(3000);
+      break;
+    }
+    writeLED(!readLED());
+    delay(300);
+  }
 }
 
 void loop()
@@ -193,7 +217,7 @@ void loop()
   {
     String str = Serial.readString();
     Serial.printf("Input: %s\n", str.c_str());
-    int values[4];
+    int values[10];
     int startIndex = 0;
     int endIndex = str.indexOf(",");
     values[0] = str.substring(startIndex, endIndex).toInt();
@@ -211,7 +235,17 @@ void loop()
     startIndex = endIndex + 1;
     endIndex = str.indexOf(",", startIndex);
 
-    values[3] = str.substring(startIndex).toInt();
+    values[3] = str.substring(startIndex, endIndex).toInt();
+
+    startIndex = endIndex + 1;
+    endIndex = str.indexOf(",", startIndex);
+
+    values[4] = str.substring(startIndex, endIndex).toInt();
+
+    startIndex = endIndex + 1;
+    endIndex = str.indexOf(",", startIndex);
+
+    values[5] = str.substring(startIndex).toInt();
 
     if (values[0] < 5)
     {
@@ -225,23 +259,23 @@ void loop()
     {
       move((float)values[1], values[2], values[3] / 100.0);
     }
+    else if (values[0] < 10)
+    {
+      rotate((float)values[1], values[2] / 100.0, (RotateMotor)values[3]);
+    }
+    else if(values[0] < 11)
+    {
+      moveUntil(values[1], values[2] / 100.0, (IRFilter)values[3], values[4], values[5]);
+    }
     else
     {
-      rotate((float)values[1], (RotateMotor)values[2]);
+      calibrate();
     }
   }
 
-  Serial.printf("Encoder count:");
-  Serial.printf(" %lld,", encoder.getCount());
-  Serial.printf(" %lld,", encoder2.getCount());
-  Serial.printf(" %lld,", encoder3.getCount());
-  Serial.printf(" %lld,", encoder4.getCount());
-  Serial.printf(" %lld,", encoder5.getCount());
-  Serial.println();
-  Serial.printf("IR: %d, %d\n", readIR(IRChannel0), readIR(IRChannel1));
-  Serial.printf("Button: %d\n", readButton());
-  writeLED(!readLED());
-  delay(300);
+  // start();
+  // Serial.printf("IR: %d, %d\n", readIR(IRChannel0), readIR(IRChannel1));
+  // delay(300);
 }
 
 void motor(MotorChannel channel, MotorDirection direction, float speed = 0)
@@ -317,7 +351,7 @@ void servo(ServoChannel channel, MinMax minMax)
 void motorEncoderCountdown(MotorEncoderCountdownParams params, bool *completedStatus)
 {
   int64_t elapsedEncoder = abs(getCurrentEncoder(params.channel));
-  Serial.printf("elapsedEncoder: %lld\n", elapsedEncoder);
+  // Serial.printf("elapsedEncoder: %lld\n", elapsedEncoder);
   if (abs(params.encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
   {
     motor(params.channel, ForceStop);
@@ -339,24 +373,27 @@ void motorEncoderCountdown(MotorEncoderCountdownParams params, bool *completedSt
   //     params.direction = Clockwise;
   //   }
   // }
-  float currentSpeed;
-  if (percentProgress < 20.0)
-  {
-    currentSpeed = 5 * params.speed / params.encoderTotal * elapsedEncoder;
-  }
-  else if (percentProgress > 60.0)
-  {
-    currentSpeed = -2.5 * params.speed / params.encoderTotal * elapsedEncoder + 2.5;
-  }
-  else
-  {
-    currentSpeed = params.speed;
-  }
-  if (currentSpeed < 0.3)
-  {
-    currentSpeed = 0.3;
-  }
-  motor(params.channel, params.direction, currentSpeed);
+
+  // float currentSpeed;
+  // if (percentProgress < 20.0)
+  // {
+  //   currentSpeed = 5 * params.speed / params.encoderTotal * elapsedEncoder;
+  // }
+  // else if (percentProgress > 60.0)
+  // {
+  //   currentSpeed = -2.5 * params.speed / params.encoderTotal * elapsedEncoder + 2.5;
+  // }
+  // else
+  // {
+  //   currentSpeed = params.speed;
+  // }
+  // if (currentSpeed < 0.3)
+  // {
+  //   currentSpeed = 0.3;
+  // }
+
+  // motor(params.channel, params.direction, currentSpeed);
+  motor(params.channel, params.direction, params.speed);
 }
 
 int64_t getCurrentEncoder(MotorChannel channel)
@@ -483,24 +520,24 @@ void move(float degree, int encoderTotal, float speed)
   }
 }
 
-void rotate(RotateDirection rotateDirection, RotateMotor rotateMotor = FrontBack)
+void rotate(RotateDirection rotateDirection, float speed, RotateMotor rotateMotor = FrontBack)
 {
   switch (rotateDirection)
   {
   case LeftRotate:
-    rotate(600, rotateMotor);
+    rotate(600, speed, rotateMotor);
     break;
   case RightRotate:
-    rotate(-600, rotateMotor);
+    rotate(-600, speed, rotateMotor);
     break;
   case UTurnRotate:
-    rotate(1200, rotateMotor);
+    rotate(1200, speed, rotateMotor);
     break;
   default:
     return;
   }
 }
-void rotate(float degree, RotateMotor rotateMotor = FrontBack)
+void rotate(float degree, float speed, RotateMotor rotateMotor = FrontBack)
 {
   MotorEncoderCountdownParams motor;
   MotorEncoderCountdownParams motor2;
@@ -525,8 +562,8 @@ void rotate(float degree, RotateMotor rotateMotor = FrontBack)
     motor.channel = Left;
     motor2.channel = Right;
   }
-  motor.speed = 1;
-  motor2.speed = 1;
+  motor.speed = speed;
+  motor2.speed = speed;
   degree = abs(degree);
   motor.encoderTotal = degree;
   motor2.encoderTotal = degree;
@@ -562,6 +599,116 @@ void stopAllMotor()
 {
   motor(Front, Stop, 0);
   motor(Back, Stop, 0);
+  motor(Left, Stop, 0);
+  motor(Right, Stop, 0);
+}
+
+void start()
+{
+  move(180, 1500, 0.8);
+}
+
+void moveUntil(float degree, float speed, IRFilter filter, bool ir, bool ir2)
+{
+  move(degree, speed);
+  while (true)
+  {
+    switch (filter)
+    {
+    case IR1:
+      if (readIR(IRChannel0) == ir)
+      {
+        forceStopAllMotor();
+        return;
+      }
+      break;
+    case IR2:
+      if (readIR(IRChannel1) == ir2)
+      {
+        forceStopAllMotor();
+        return;
+      }
+      break;
+    case IR1orIR2:
+      if (readIR(IRChannel0) == ir || readIR(IRChannel1) == ir2)
+      {
+        forceStopAllMotor();
+        return;
+      }
+      break;
+    case IR1andIR2:
+      if (readIR(IRChannel0) == ir && readIR(IRChannel1) == ir2)
+      {
+        forceStopAllMotor();
+        return;
+      }
+      break;
+    }
+  }
+}
+
+void move(float degree, float speed)
+{
+  float speedMotorFrontBack = abs(cos(degree * PI / 180.0)) * speed;
+  float speedMotorLeftRight = abs(sin(degree * PI / 180.0)) * speed;
+
+  MotorDirection motorFrontDirection, motorBackDirection;
+  if (degree >= 90 && degree <= 270)
+  {
+    motorFrontDirection = Clockwise;
+    motorBackDirection = CounterClockwise;
+  }
+  else
+  {
+    motorFrontDirection = CounterClockwise;
+    motorBackDirection = Clockwise;
+  }
+
+  MotorDirection motorLeftDirection, motorRightDirection;
+  if (degree >= 0 && degree <= 180)
+  {
+    motorLeftDirection = CounterClockwise;
+    motorRightDirection = Clockwise;
+  }
+  else
+  {
+    motorLeftDirection = Clockwise;
+    motorRightDirection = CounterClockwise;
+  }
+  motor(Front, motorFrontDirection, speedMotorFrontBack);
+  motor(Back, motorBackDirection, speedMotorFrontBack);
+  motor(Left, motorLeftDirection, speedMotorLeftRight);
+  motor(Right, motorRightDirection, speedMotorLeftRight);
+}
+
+void forceStopAllMotor()
+{
+  motor(Front, ForceStop, 0);
+  motor(Back, ForceStop, 0);
+  motor(Left, ForceStop, 0);
+  motor(Right, ForceStop, 0);
+}
+
+void calibrate()
+{
+  if (readIR(IRChannel0))
+  {
+    motor(Left, ForceStop, 0);
+    motor(Right, Clockwise, 0.3);
+    while (!readIR(IRChannel1))
+    {
+      delay(1);
+    }
+  }
+  else if (readIR(IRChannel1))
+  {
+    motor(Right, ForceStop, 0);
+    motor(Left, CounterClockwise, 0.3);
+    while (!readIR(IRChannel0))
+    {
+      delay(1);
+    }
+  }
   motor(Left, Stop, 0);
   motor(Right, Stop, 0);
 }
