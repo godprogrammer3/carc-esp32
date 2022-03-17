@@ -389,10 +389,10 @@ bool readLED()
 
 void move(float degree, int encoderTotal, float speed)
 {
-  float speedMotorFrontBack = cos(degree * PI / 180.0) * speed;
-  int encoderMotorFrontBack = cos(degree * PI / 180.0) * encoderTotal;
-  float speedMotorLeftRight = sin(degree * PI / 180.0) * speed;
-  int encoderMotorLeftRight = sin(degree * PI / 180.0) * encoderTotal;
+  float speedMotorFrontBack = abs(cos(degree * PI / 180.0)) * speed;
+  int encoderMotorFrontBack = abs(cos(degree * PI / 180.0)) * encoderTotal;
+  float speedMotorLeftRight = abs(sin(degree * PI / 180.0)) * speed;
+  int encoderMotorLeftRight = abs(sin(degree * PI / 180.0)) * encoderTotal;
 
   MotorDirection motorFrontDirection, motorBackDirection;
   if (degree >= 90 && degree <= 270)
