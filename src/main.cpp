@@ -32,8 +32,7 @@
 #define MOTOR5_A_PIN 8
 #define MOTOR5_B_PIN 9
 #define MOTOR5_PWM_PIN 23
-#define MOTOR_PULSE_COUNTDOWN_TOLERENT 20
-#define MOTOR_PULSE_COUNTDOWN_TIMEOUT 60
+#define MOTOR_PULSE_COUNTDOWN_TOLERENT 15
 
 // Servo
 #define SERVO_PWM_FREQ 50
@@ -49,8 +48,8 @@
 #define SERVO3_MAX 25
 
 // IR
-#define IR_PIN 15
-#define IR2_PIN 7
+#define IR_PIN 10
+#define IR2_PIN 11
 
 // Button
 #define BUTTON_PIN 13
@@ -97,6 +96,11 @@ enum IRChannel
   IRChannel0,
   IRChannel1,
 };
+enum RotateMotor
+{
+  FrontBack,
+  LeftRight,
+};
 typedef struct
 {
   MotorChannel channel;
@@ -113,12 +117,15 @@ const int8_t servoPwmPins[] = {SERVO_PWM_PIN, SERVO2_PWM_PIN, SERVO3_PWM_PIN};
 void motor(MotorChannel channel, MotorDirection direction, float speed);
 void servo(ServoChannel channel, int pulseWidth);
 int64_t getCurrentEncoder(MotorChannel channel);
-void motorEncoderCountdown(MotorEncoderCountdownParams params, int64_t saveEncoder);
+void motorEncoderCountdown(MotorEncoderCountdownParams params, bool *completedStatus);
 bool readIR(IRChannel irChannel);
 bool readButton();
 void writeLED(bool state);
 bool readLED();
 void move(float degree, int encoderTotal, float speed);
+void rotate(RotateDirection rotateDirection, RotateMotor rotateMotor);
+void rotate(float degree, RotateMotor rotateMotor);
+void clearAllEncoder();
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -175,8 +182,8 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
 
   // IR
-  pinMode(IR_PIN, INPUT);
-  pinMode(IR2_PIN, INPUT);
+  mcp.pinMode(IR_PIN, INPUT);
+  mcp.pinMode(IR2_PIN, INPUT);
 }
 
 void loop()
@@ -213,9 +220,13 @@ void loop()
     {
       servo((ServoChannel)(values[0] - 5), values[1]);
     }
-    else
+    else if (values[0] < 9)
     {
       move((float)values[1], values[2], values[3] / 100.0);
+    }
+    else
+    {
+      rotate((float)values[1], (RotateMotor)values[2]);
     }
   }
 
@@ -302,10 +313,10 @@ void servo(ServoChannel channel, MinMax minMax)
   }
 }
 
-void motorEncoderCountdown(MotorEncoderCountdownParams params, int64_t saveEncoder, bool *completedStatus)
+void motorEncoderCountdown(MotorEncoderCountdownParams params, bool *completedStatus)
 {
-  int64_t elapsedEncoder = abs(getCurrentEncoder(params.channel) - saveEncoder);
-
+  int64_t elapsedEncoder = abs(getCurrentEncoder(params.channel));
+  Serial.printf("elapsedEncoder: %lld\n", elapsedEncoder);
   if (abs(params.encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
   {
     motor(params.channel, ForceStop);
@@ -314,21 +325,27 @@ void motorEncoderCountdown(MotorEncoderCountdownParams params, int64_t saveEncod
     return;
   }
   float percentProgress = abs(elapsedEncoder / params.encoderTotal * 100.0);
-  if (percentProgress > 100.0)
-  {
-    motor(params.channel, ForceStop);
-    multitaskCompletedCount++;
-    *completedStatus = true;
-    return;
-  }
+  // if (percentProgress > 100.0)
+  // {
+  //   motor(params.channel, ForceStop);
+  //   delay(300);
+  //   if (params.direction == Clockwise)
+  //   {
+  //     params.direction = CounterClockwise;
+  //   }
+  //   else
+  //   {
+  //     params.direction = Clockwise;
+  //   }
+  // }
   float currentSpeed;
-  if (percentProgress < 30.0)
+  if (percentProgress < 20.0)
   {
-    currentSpeed = 3.3 * params.speed / params.encoderTotal * elapsedEncoder;
+    currentSpeed = 5 * params.speed / params.encoderTotal * elapsedEncoder;
   }
-  else if (percentProgress > 70.0)
+  else if (percentProgress > 60.0)
   {
-    currentSpeed = -3.3 * params.speed / params.encoderTotal * elapsedEncoder + 3.3;
+    currentSpeed = -2.5 * params.speed / params.encoderTotal * elapsedEncoder + 2.5;
   }
   else
   {
@@ -364,11 +381,11 @@ bool readIR(IRChannel irChannel)
 {
   if (irChannel == IRChannel0)
   {
-    return digitalRead(IR_PIN);
+    return mcp.digitalRead(IR_PIN);
   }
   else
   {
-    return digitalRead(IR2_PIN);
+    return mcp.digitalRead(IR2_PIN);
   }
 }
 
@@ -419,11 +436,7 @@ void move(float degree, int encoderTotal, float speed)
   }
 
   multitaskCompletedCount = 0;
-  int64_t saveEncoderFront, saveEncoderBack, saveEncoderLeft, saveEncoderRight;
-  saveEncoderFront = getCurrentEncoder(Front);
-  saveEncoderBack = getCurrentEncoder(Back);
-  saveEncoderLeft = getCurrentEncoder(Left);
-  saveEncoderRight = getCurrentEncoder(Right);
+  clearAllEncoder();
   MotorEncoderCountdownParams front;
   front.channel = Front;
   front.direction = motorFrontDirection;
@@ -452,19 +465,92 @@ void move(float degree, int encoderTotal, float speed)
   {
     if (!frontCompleteStatus)
     {
-      motorEncoderCountdown(front, saveEncoderFront, &frontCompleteStatus);
+      motorEncoderCountdown(front, &frontCompleteStatus);
     }
     if (!backCompleteStatus)
     {
-      motorEncoderCountdown(back, saveEncoderBack, &backCompleteStatus);
+      motorEncoderCountdown(back, &backCompleteStatus);
     }
     if (!leftCompleteStatus)
     {
-      motorEncoderCountdown(left, saveEncoderLeft, &leftCompleteStatus);
+      motorEncoderCountdown(left, &leftCompleteStatus);
     }
     if (!rightCompleteStatus)
     {
-      motorEncoderCountdown(right, saveEncoderRight, &rightCompleteStatus);
+      motorEncoderCountdown(right, &rightCompleteStatus);
     }
   }
+}
+
+void rotate(RotateDirection rotateDirection, RotateMotor rotateMotor = FrontBack)
+{
+  switch (rotateDirection)
+  {
+  case LeftRotate:
+    rotate(450, rotateMotor);
+    break;
+  case RightRotate:
+    rotate(-450, rotateMotor);
+    break;
+  case UTurnRotate:
+    rotate(2700, rotateMotor);
+    break;
+  default:
+    return;
+  }
+}
+void rotate(float degree, RotateMotor rotateMotor = FrontBack)
+{
+  MotorEncoderCountdownParams motor;
+  MotorEncoderCountdownParams motor2;
+  if (degree > 0)
+  {
+    motor.direction = Clockwise;
+    motor2.direction = Clockwise;
+  }
+  else
+  {
+    motor.direction = CounterClockwise;
+    motor2.direction = CounterClockwise;
+  }
+
+  if (rotateMotor == FrontBack)
+  {
+    motor.channel = Front;
+    motor2.channel = Back;
+  }
+  else
+  {
+    motor.channel = Left;
+    motor2.channel = Right;
+  }
+  motor.speed = 1;
+  motor2.speed = 1;
+  motor.encoderTotal = degree;
+  motor2.encoderTotal = degree;
+
+  bool isMotorComplete = false;
+  bool isMotor2Complete = false;
+  multitaskCompletedCount = 0;
+  clearAllEncoder();
+  while (multitaskCompletedCount < 2)
+  {
+    if (!isMotorComplete)
+    {
+      motorEncoderCountdown(motor, &isMotorComplete);
+    }
+    if (!isMotor2Complete)
+    {
+      motorEncoderCountdown(motor2, &isMotor2Complete);
+    }
+  }
+}
+
+void clearAllEncoder()
+{
+  encoder.clearCount();
+  encoder2.clearCount();
+  encoder3.clearCount();
+  encoder4.clearCount();
+  encoder5.clearCount();
 }
