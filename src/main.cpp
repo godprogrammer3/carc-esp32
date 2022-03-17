@@ -32,7 +32,7 @@
 #define MOTOR5_A_PIN 8
 #define MOTOR5_B_PIN 9
 #define MOTOR5_PWM_PIN 23
-#define MOTOR_PULSE_COUNTDOWN_TOLERENT 10
+#define MOTOR_PULSE_COUNTDOWN_TOLERENT 20
 #define MOTOR_PULSE_COUNTDOWN_TIMEOUT 60
 
 // Servo
@@ -69,9 +69,9 @@ enum MotorDirection
 };
 enum MotorChannel
 {
-  Front,
   Back,
   Left,
+  Front,
   Right,
   Grabber,
 };
@@ -120,6 +120,7 @@ bool readIR(IRChannel irChannel);
 bool readButton();
 void writeLED(bool state);
 bool readLED();
+void move(float degree, int encoderTotal, float speed);
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -147,6 +148,7 @@ void setup()
   if (!mcp.begin_I2C())
   {
     // Serial.println("IO Extender Error");
+    delay(2000);
     ESP.restart();
   }
 
@@ -185,7 +187,7 @@ void loop()
   {
     String str = Serial.readString();
     Serial.printf("Input: %s\n", str.c_str());
-    int values[3];
+    int values[4];
     int startIndex = 0;
     int endIndex = str.indexOf(",");
     values[0] = str.substring(startIndex, endIndex).toInt();
@@ -196,26 +198,50 @@ void loop()
     values[1] = str.substring(startIndex, endIndex).toInt();
 
     startIndex = endIndex + 1;
+    endIndex = str.indexOf(",", startIndex);
 
-    values[2] = str.substring(startIndex).toInt();
+    values[2] = str.substring(startIndex, endIndex).toInt();
+
+    startIndex = endIndex + 1;
+    endIndex = str.indexOf(",", startIndex);
+
+    values[3] = str.substring(startIndex).toInt();
 
     if (values[0] < 5)
     {
       motor((MotorChannel)values[0], (MotorDirection)values[1], values[2] / 100.0);
     }
-    else
+    else if (values[0] < 8)
     {
       servo((ServoChannel)(values[0] - 5), values[1]);
     }
+    else if (values[0] < 13)
+    {
+      multitaskCompletedCount = 0;
+      MotorEncoderCountdownParams params = {(MotorChannel)(values[0] - 8), (MotorDirection)values[1], values[2] / 100.0, values[3]};
+      xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params), 1, NULL);
+      while (true)
+      {
+        if (multitaskCompletedCount >= 1)
+        {
+          break;
+        }
+        delay(50);
+      }
+    }
+    else
+    {
+      move((float)values[1], values[2], values[3] / 100.0);
+    }
   }
 
-  // Serial.printf("Encoder count:");
-  // Serial.printf(" %lld,", encoder.getCount());
-  // Serial.printf(" %lld,", encoder2.getCount());
-  // Serial.printf(" %lld,", encoder3.getCount());
-  // Serial.printf(" %lld,", encoder4.getCount());
-  // Serial.printf(" %lld,", encoder5.getCount());
-  // Serial.println();
+  Serial.printf("Encoder count:");
+  Serial.printf(" %lld,", encoder.getCount());
+  Serial.printf(" %lld,", encoder2.getCount());
+  Serial.printf(" %lld,", encoder3.getCount());
+  Serial.printf(" %lld,", encoder4.getCount());
+  Serial.printf(" %lld,", encoder5.getCount());
+  Serial.println();
   Serial.printf("IR: %d, %d\n", readIR(IRChannel0), readIR(IRChannel1));
   Serial.printf("Button: %d\n", readButton());
   writeLED(!readLED());
@@ -296,40 +322,51 @@ void motorEncoderCountdown(void *params)
 {
   MotorEncoderCountdownParams _params = *(MotorEncoderCountdownParams *)params;
   int64_t saveEncoder = getCurrentEncoder(_params.channel);
+
   unsigned long long int saveTime = millis();
   while (true)
   {
     if (millis() - saveTime > MOTOR_PULSE_COUNTDOWN_TIMEOUT * 1000)
     {
       motor(_params.channel, ForceStop);
-      return;
+      multitaskCompletedCount++;
+      vTaskDelete(NULL);
     }
-    int64_t elapsedEncoder = getCurrentEncoder(_params.channel) - saveEncoder;
+    int64_t elapsedEncoder = abs(getCurrentEncoder(_params.channel) - saveEncoder);
     if (abs(_params.encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
     {
       motor(_params.channel, ForceStop);
-      return;
+      multitaskCompletedCount++;
+      vTaskDelete(NULL);
     }
-    float percentProgress = elapsedEncoder / _params.encoderTotal * 100.0;
+    float percentProgress = abs(elapsedEncoder / _params.encoderTotal * 100.0);
+    if (percentProgress > 100.0)
+    {
+      motor(_params.channel, ForceStop);
+      multitaskCompletedCount++;
+      vTaskDelete(NULL);
+    }
+
+    Serial.printf("percentProgress: %f\n", percentProgress);
     float currentSpeed;
-    if (percentProgress < 10.0)
+    if (percentProgress < 30.0)
     {
-      currentSpeed = 5 * _params.speed / _params.encoderTotal * elapsedEncoder;
+      currentSpeed = 3.3 * _params.speed / _params.encoderTotal * elapsedEncoder;
     }
-    else if (percentProgress > 90)
+    else if (percentProgress > 70.0)
     {
-      currentSpeed = -5 * _params.speed / _params.encoderTotal * elapsedEncoder + 5;
+      currentSpeed = -3.3 * _params.speed / _params.encoderTotal * elapsedEncoder + 3.3;
     }
     else
     {
       currentSpeed = _params.speed;
     }
-    if (currentSpeed < 0.1)
+    if (currentSpeed < 0.2)
     {
-      currentSpeed = 0.1;
+      currentSpeed = 0.2;
     }
     motor(_params.channel, _params.direction, currentSpeed);
-    vTaskDelay(100);
+    vTaskDelay(10);
   }
 }
 
@@ -337,11 +374,11 @@ int64_t getCurrentEncoder(MotorChannel channel)
 {
   switch (channel)
   {
-  case Front:
-    return encoder.getCount();
   case Back:
-    return encoder2.getCount();
+    return encoder.getCount();
   case Left:
+    return encoder2.getCount();
+  case Front:
     return encoder3.getCount();
   case Right:
     return encoder4.getCount();
@@ -377,10 +414,10 @@ void rotateDegree(void *degree)
   MotorEncoderCountdownParams params2 = {Left, Clockwise, 0.5, 1000};
   MotorEncoderCountdownParams params3 = {Right, Clockwise, 0.5, 1000};
   MotorEncoderCountdownParams params4 = {Back, Clockwise, 0.5, 1000};
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params), 1, &task);
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params2), 1, &task2);
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params3), 1, &task3);
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params4), 1, &task4);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params), 1, &task);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params2), 1, &task2);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params3), 1, &task3);
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params4), 1, &task4);
   while (true)
   {
     if (millis() - saveTime > ROTATE_TIMEOUT)
@@ -424,4 +461,65 @@ void writeLED(bool state)
 bool readLED()
 {
   return digitalRead(LED_PIN);
+}
+
+void move(float degree, int encoderTotal, float speed)
+{
+  float speedMotorFrontBack = cos(degree) * speed;
+  int encoderMotorFrontBack = cos(degree) * encoderTotal;
+  float speedMotorLeftRight = sin(degree) * speed;
+  int encoderMotorLeftRight = sin(degree) * encoderTotal;
+
+  MotorDirection motorFrontDirection, motorBackDirection;
+  if (degree >= 90 && degree <= 270)
+  {
+    motorFrontDirection = Clockwise;
+    motorBackDirection = CounterClockwise;
+  }
+  else
+  {
+    motorFrontDirection = CounterClockwise;
+    motorBackDirection = Clockwise;
+  }
+
+  MotorDirection motorLeftDirection, motorRightDirection;
+  if (degree >= 0 && degree <= 180)
+  {
+    motorLeftDirection = CounterClockwise;
+    motorRightDirection = Clockwise;
+  }
+  else
+  {
+    motorLeftDirection = Clockwise;
+    motorRightDirection = CounterClockwise;
+  }
+
+  multitaskCompletedCount = 0;
+  unsigned long long int saveTime = millis();
+  TaskHandle_t task = NULL, task2 = NULL, task3 = NULL, task4 = NULL;
+  MotorEncoderCountdownParams params = {Front, motorFrontDirection, speedMotorFrontBack, encoderMotorFrontBack};
+  // MotorEncoderCountdownParams params2 = {Left, motorLeftDirection, speedMotorLeftRight, encoderMotorLeftRight};
+  // MotorEncoderCountdownParams params3 = {Right, motorRightDirection, speedMotorLeftRight, encoderMotorLeftRight};
+  // MotorEncoderCountdownParams params4 = {Back, motorBackDirection, speedMotorFrontBack, encoderMotorFrontBack};
+  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 1900, (void *)(&params), 1, &task);
+  // xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params2), 1, &task2);
+  // xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params3), 1, &task3);
+  // xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params4), 1, &task4);
+  while (true)
+  {
+    if (millis() - saveTime > ROTATE_TIMEOUT * 1000)
+    {
+      vTaskDelete(task);
+      // vTaskDelete(task2);
+      // vTaskDelete(task3);
+      // vTaskDelete(task4);
+      return;
+    }
+    if (multitaskCompletedCount >= 1)
+    {
+      return;
+    }
+    Serial.printf("multitaskCompletedCount: %d\n", multitaskCompletedCount);
+    delay(20);
+  }
 }
