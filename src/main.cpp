@@ -113,9 +113,7 @@ const int8_t servoPwmPins[] = {SERVO_PWM_PIN, SERVO2_PWM_PIN, SERVO3_PWM_PIN};
 void motor(MotorChannel channel, MotorDirection direction, float speed);
 void servo(ServoChannel channel, int pulseWidth);
 int64_t getCurrentEncoder(MotorChannel channel);
-void motorEncoderCountdown(void *params);
-void rotateDirection(void *rotateDirection);
-void rotateDegree(void *degree);
+void motorEncoderCountdown(MotorEncoderCountdownParams params, int64_t saveEncoder);
 bool readIR(IRChannel irChannel);
 bool readButton();
 void writeLED(bool state);
@@ -215,20 +213,6 @@ void loop()
     {
       servo((ServoChannel)(values[0] - 5), values[1]);
     }
-    else if (values[0] < 13)
-    {
-      multitaskCompletedCount = 0;
-      MotorEncoderCountdownParams params = {(MotorChannel)(values[0] - 8), (MotorDirection)values[1], values[2] / 100.0, values[3]};
-      xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 2048, (void *)(&params), 1, NULL);
-      while (true)
-      {
-        if (multitaskCompletedCount >= 1)
-        {
-          break;
-        }
-        delay(50);
-      }
-    }
     else
     {
       move((float)values[1], values[2], values[3] / 100.0);
@@ -318,56 +302,43 @@ void servo(ServoChannel channel, MinMax minMax)
   }
 }
 
-void motorEncoderCountdown(void *params)
+void motorEncoderCountdown(MotorEncoderCountdownParams params, int64_t saveEncoder, bool *completedStatus)
 {
-  MotorEncoderCountdownParams _params = *(MotorEncoderCountdownParams *)params;
-  int64_t saveEncoder = getCurrentEncoder(_params.channel);
+  int64_t elapsedEncoder = abs(getCurrentEncoder(params.channel) - saveEncoder);
 
-  unsigned long long int saveTime = millis();
-  while (true)
+  if (abs(params.encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
   {
-    if (millis() - saveTime > MOTOR_PULSE_COUNTDOWN_TIMEOUT * 1000)
-    {
-      motor(_params.channel, ForceStop);
-      multitaskCompletedCount++;
-      vTaskDelete(NULL);
-    }
-    int64_t elapsedEncoder = abs(getCurrentEncoder(_params.channel) - saveEncoder);
-    if (abs(_params.encoderTotal - elapsedEncoder) <= MOTOR_PULSE_COUNTDOWN_TOLERENT)
-    {
-      motor(_params.channel, ForceStop);
-      multitaskCompletedCount++;
-      vTaskDelete(NULL);
-    }
-    float percentProgress = abs(elapsedEncoder / _params.encoderTotal * 100.0);
-    if (percentProgress > 100.0)
-    {
-      motor(_params.channel, ForceStop);
-      multitaskCompletedCount++;
-      vTaskDelete(NULL);
-    }
-
-    Serial.printf("percentProgress: %f\n", percentProgress);
-    float currentSpeed;
-    if (percentProgress < 30.0)
-    {
-      currentSpeed = 3.3 * _params.speed / _params.encoderTotal * elapsedEncoder;
-    }
-    else if (percentProgress > 70.0)
-    {
-      currentSpeed = -3.3 * _params.speed / _params.encoderTotal * elapsedEncoder + 3.3;
-    }
-    else
-    {
-      currentSpeed = _params.speed;
-    }
-    if (currentSpeed < 0.2)
-    {
-      currentSpeed = 0.2;
-    }
-    motor(_params.channel, _params.direction, currentSpeed);
-    vTaskDelay(10);
+    motor(params.channel, ForceStop);
+    multitaskCompletedCount++;
+    *completedStatus = true;
+    return;
   }
+  float percentProgress = abs(elapsedEncoder / params.encoderTotal * 100.0);
+  if (percentProgress > 100.0)
+  {
+    motor(params.channel, ForceStop);
+    multitaskCompletedCount++;
+    *completedStatus = true;
+    return;
+  }
+  float currentSpeed;
+  if (percentProgress < 30.0)
+  {
+    currentSpeed = 3.3 * params.speed / params.encoderTotal * elapsedEncoder;
+  }
+  else if (percentProgress > 70.0)
+  {
+    currentSpeed = -3.3 * params.speed / params.encoderTotal * elapsedEncoder + 3.3;
+  }
+  else
+  {
+    currentSpeed = params.speed;
+  }
+  if (currentSpeed < 0.2)
+  {
+    currentSpeed = 0.2;
+  }
+  motor(params.channel, params.direction, currentSpeed);
 }
 
 int64_t getCurrentEncoder(MotorChannel channel)
@@ -386,53 +357,6 @@ int64_t getCurrentEncoder(MotorChannel channel)
     return encoder5.getCount();
   default:
     return 0;
-  }
-}
-
-void rotateDirection(void *rotateDirection)
-{
-  RotateDirection _rotateDirection = *(RotateDirection *)(rotateDirection);
-  switch (_rotateDirection)
-  {
-  case LeftRotate:
-    rotateDegree((int *)90);
-  case RightRotate:
-    rotateDegree((int *)-90);
-  case UTurnRotate:
-    rotateDegree((int *)180);
-  default:
-    return;
-  }
-}
-
-void rotateDegree(void *degree)
-{
-  multitaskCompletedCount = 0;
-  unsigned long long int saveTime = millis();
-  TaskHandle_t task = NULL, task2 = NULL, task3 = NULL, task4 = NULL;
-  MotorEncoderCountdownParams params = {Front, Clockwise, 0.5, 1000};
-  MotorEncoderCountdownParams params2 = {Left, Clockwise, 0.5, 1000};
-  MotorEncoderCountdownParams params3 = {Right, Clockwise, 0.5, 1000};
-  MotorEncoderCountdownParams params4 = {Back, Clockwise, 0.5, 1000};
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params), 1, &task);
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params2), 1, &task2);
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params3), 1, &task3);
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params4), 1, &task4);
-  while (true)
-  {
-    if (millis() - saveTime > ROTATE_TIMEOUT)
-    {
-      vTaskDelete(task);
-      vTaskDelete(task2);
-      vTaskDelete(task3);
-      vTaskDelete(task4);
-      return;
-    }
-    if (multitaskCompletedCount >= 4)
-    {
-      return;
-    }
-    delay(100);
   }
 }
 
@@ -465,10 +389,10 @@ bool readLED()
 
 void move(float degree, int encoderTotal, float speed)
 {
-  float speedMotorFrontBack = cos(degree) * speed;
-  int encoderMotorFrontBack = cos(degree) * encoderTotal;
-  float speedMotorLeftRight = sin(degree) * speed;
-  int encoderMotorLeftRight = sin(degree) * encoderTotal;
+  float speedMotorFrontBack = cos(degree * PI / 180.0) * speed;
+  int encoderMotorFrontBack = cos(degree * PI / 180.0) * encoderTotal;
+  float speedMotorLeftRight = sin(degree * PI / 180.0) * speed;
+  int encoderMotorLeftRight = sin(degree * PI / 180.0) * encoderTotal;
 
   MotorDirection motorFrontDirection, motorBackDirection;
   if (degree >= 90 && degree <= 270)
@@ -495,31 +419,52 @@ void move(float degree, int encoderTotal, float speed)
   }
 
   multitaskCompletedCount = 0;
-  unsigned long long int saveTime = millis();
-  TaskHandle_t task = NULL, task2 = NULL, task3 = NULL, task4 = NULL;
-  MotorEncoderCountdownParams params = {Front, motorFrontDirection, speedMotorFrontBack, encoderMotorFrontBack};
-  // MotorEncoderCountdownParams params2 = {Left, motorLeftDirection, speedMotorLeftRight, encoderMotorLeftRight};
-  // MotorEncoderCountdownParams params3 = {Right, motorRightDirection, speedMotorLeftRight, encoderMotorLeftRight};
-  // MotorEncoderCountdownParams params4 = {Back, motorBackDirection, speedMotorFrontBack, encoderMotorFrontBack};
-  xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 1900, (void *)(&params), 1, &task);
-  // xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params2), 1, &task2);
-  // xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params3), 1, &task3);
-  // xTaskCreate(&motorEncoderCountdown, "motorEncoderCountdown task", 4096, (void *)(&params4), 1, &task4);
-  while (true)
+  int64_t saveEncoderFront, saveEncoderBack, saveEncoderLeft, saveEncoderRight;
+  saveEncoderFront = getCurrentEncoder(Front);
+  saveEncoderBack = getCurrentEncoder(Back);
+  saveEncoderLeft = getCurrentEncoder(Left);
+  saveEncoderRight = getCurrentEncoder(Right);
+  MotorEncoderCountdownParams front;
+  front.channel = Front;
+  front.direction = motorFrontDirection;
+  front.speed = speedMotorFrontBack;
+  front.encoderTotal = encoderMotorFrontBack;
+  MotorEncoderCountdownParams back;
+  back.channel = Back;
+  back.direction = motorBackDirection;
+  back.speed = speedMotorFrontBack;
+  back.encoderTotal = encoderMotorFrontBack;
+  MotorEncoderCountdownParams left;
+  left.channel = Left;
+  left.direction = motorLeftDirection;
+  left.speed = speedMotorLeftRight;
+  left.encoderTotal = encoderMotorLeftRight;
+  MotorEncoderCountdownParams right;
+  right.channel = Right;
+  right.direction = motorRightDirection;
+  right.speed = speedMotorLeftRight;
+  right.encoderTotal = encoderMotorLeftRight;
+  bool frontCompleteStatus = false;
+  bool backCompleteStatus = false;
+  bool leftCompleteStatus = false;
+  bool rightCompleteStatus = false;
+  while (multitaskCompletedCount < 4)
   {
-    if (millis() - saveTime > ROTATE_TIMEOUT * 1000)
+    if (!frontCompleteStatus)
     {
-      vTaskDelete(task);
-      // vTaskDelete(task2);
-      // vTaskDelete(task3);
-      // vTaskDelete(task4);
-      return;
+      motorEncoderCountdown(front, saveEncoderFront, &frontCompleteStatus);
     }
-    if (multitaskCompletedCount >= 1)
+    if (!backCompleteStatus)
     {
-      return;
+      motorEncoderCountdown(back, saveEncoderBack, &backCompleteStatus);
     }
-    Serial.printf("multitaskCompletedCount: %d\n", multitaskCompletedCount);
-    delay(20);
+    if (!leftCompleteStatus)
+    {
+      motorEncoderCountdown(left, saveEncoderLeft, &leftCompleteStatus);
+    }
+    if (!rightCompleteStatus)
+    {
+      motorEncoderCountdown(right, saveEncoderRight, &rightCompleteStatus);
+    }
   }
 }

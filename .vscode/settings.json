@@ -1,6 +1,9 @@
 {
   "files.associations": {
     "cmath": "cpp",
-    "cstdlib": "cpp"
+    "cstdlib": "cpp",
+    "array": "cpp",
+    "deque": "cpp",
+    "vector": "cpp"
   }
 }
