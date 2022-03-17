@@ -126,6 +126,7 @@ void move(float degree, int encoderTotal, float speed);
 void rotate(RotateDirection rotateDirection, RotateMotor rotateMotor);
 void rotate(float degree, RotateMotor rotateMotor);
 void clearAllEncoder();
+void stopAllMotor();
 
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
@@ -351,9 +352,9 @@ void motorEncoderCountdown(MotorEncoderCountdownParams params, bool *completedSt
   {
     currentSpeed = params.speed;
   }
-  if (currentSpeed < 0.2)
+  if (currentSpeed < 0.3)
   {
-    currentSpeed = 0.2;
+    currentSpeed = 0.3;
   }
   motor(params.channel, params.direction, currentSpeed);
 }
@@ -487,13 +488,13 @@ void rotate(RotateDirection rotateDirection, RotateMotor rotateMotor = FrontBack
   switch (rotateDirection)
   {
   case LeftRotate:
-    rotate(450, rotateMotor);
+    rotate(600, rotateMotor);
     break;
   case RightRotate:
-    rotate(-450, rotateMotor);
+    rotate(-600, rotateMotor);
     break;
   case UTurnRotate:
-    rotate(2700, rotateMotor);
+    rotate(1200, rotateMotor);
     break;
   default:
     return;
@@ -533,6 +534,7 @@ void rotate(float degree, RotateMotor rotateMotor = FrontBack)
   bool isMotorComplete = false;
   bool isMotor2Complete = false;
   multitaskCompletedCount = 0;
+  stopAllMotor();
   clearAllEncoder();
   while (multitaskCompletedCount < 2)
   {
@@ -554,4 +556,12 @@ void clearAllEncoder()
   encoder3.clearCount();
   encoder4.clearCount();
   encoder5.clearCount();
+}
+
+void stopAllMotor()
+{
+  motor(Front, Stop, 0);
+  motor(Back, Stop, 0);
+  motor(Left, Stop, 0);
+  motor(Right, Stop, 0);
 }
