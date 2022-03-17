@@ -526,6 +526,7 @@ void rotate(float degree, RotateMotor rotateMotor = FrontBack)
   }
   motor.speed = 1;
   motor2.speed = 1;
+  degree = abs(degree);
   motor.encoderTotal = degree;
   motor2.encoderTotal = degree;
 
