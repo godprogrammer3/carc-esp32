@@ -139,7 +139,6 @@ void start();
 void moveUntil(float degree, float speed, IRFilter filter, bool ir, bool ir2);
 void forceStopAllMotor();
 void calibrate();
-
 ESP32Encoder encoder;
 ESP32Encoder encoder2;
 ESP32Encoder encoder3;
@@ -203,7 +202,7 @@ void setup()
     if (readButton())
     {
       writeLED(false);
-      delay(3000);
+      delay(1000);
       break;
     }
     writeLED(!readLED());
@@ -263,7 +262,7 @@ void loop()
     {
       rotate((float)values[1], values[2] / 100.0, (RotateMotor)values[3]);
     }
-    else if(values[0] < 11)
+    else if (values[0] < 11)
     {
       moveUntil(values[1], values[2] / 100.0, (IRFilter)values[3], values[4], values[5]);
     }
@@ -276,6 +275,11 @@ void loop()
   // start();
   // Serial.printf("IR: %d, %d\n", readIR(IRChannel0), readIR(IRChannel1));
   // delay(300);
+  start();
+  while (true)
+  {
+    delay(100);
+  }
 }
 
 void motor(MotorChannel channel, MotorDirection direction, float speed = 0)
@@ -520,7 +524,7 @@ void move(float degree, int encoderTotal, float speed)
   }
 }
 
-void rotate(RotateDirection rotateDirection, float speed, RotateMotor rotateMotor = FrontBack)
+void rotate(RotateDirection rotateDirection, float speed, RotateMotor rotateMotor = LeftRight)
 {
   switch (rotateDirection)
   {
@@ -537,7 +541,7 @@ void rotate(RotateDirection rotateDirection, float speed, RotateMotor rotateMoto
     return;
   }
 }
-void rotate(float degree, float speed, RotateMotor rotateMotor = FrontBack)
+void rotate(float degree, float speed, RotateMotor rotateMotor = LeftRight)
 {
   MotorEncoderCountdownParams motor;
   MotorEncoderCountdownParams motor2;
@@ -601,11 +605,6 @@ void stopAllMotor()
   motor(Back, Stop, 0);
   motor(Left, Stop, 0);
   motor(Right, Stop, 0);
-}
-
-void start()
-{
-  move(180, 1500, 0.8);
 }
 
 void moveUntil(float degree, float speed, IRFilter filter, bool ir, bool ir2)
@@ -695,6 +694,7 @@ void calibrate()
   {
     motor(Left, ForceStop, 0);
     motor(Right, Clockwise, 0.3);
+    motor(Back, Clockwise, 0.3);
     while (!readIR(IRChannel1))
     {
       delay(1);
@@ -704,6 +704,7 @@ void calibrate()
   {
     motor(Right, ForceStop, 0);
     motor(Left, CounterClockwise, 0.3);
+    motor(Back, CounterClockwise, 0.3);
     while (!readIR(IRChannel0))
     {
       delay(1);
@@ -711,4 +712,22 @@ void calibrate()
   }
   motor(Left, Stop, 0);
   motor(Right, Stop, 0);
+  motor(Back, Stop, 0.3);
+}
+
+void start()
+{
+  move(90, 2500, 0.8);
+  delay(500);
+  rotate(-562, 0.5);
+  delay(500);
+  moveUntil(90, 0.4, IR1orIR2, true, true);
+  delay(200);
+  calibrate();
+  delay(300);
+  move(90, 50, 0.3);
+  delay(300);
+  moveUntil(0, 0.3, IR2, true, true);
+  delay(50);
+  move(0, 45, 0.3);
 }
